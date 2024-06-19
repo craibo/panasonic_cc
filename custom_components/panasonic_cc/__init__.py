@@ -68,7 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     enable_daily_energy_sensor = entry.options.get(CONF_ENABLE_DAILY_ENERGY_SENSOR, DEFAULT_ENABLE_DAILY_ENERGY_SENSOR)
 
     session = pcomfortcloud.Session(username, password)
-    api = await hass.async_add_executor_job(session.load_token())
+    api = await hass.async_add_executor_job(session.load_token)
     devices = await hass.async_add_executor_job(api.get_devices)
     for device in devices:
         try:
