@@ -2,14 +2,19 @@ import json
 from datetime import timedelta
 import logging
 from datetime import datetime
+from functools import cached_property 
 
 from typing import Optional
 from homeassistant.util import Throttle
 from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant
 from homeassistant.components.climate.const import ATTR_HVAC_MODE
+from homeassistant.helpers.storage import Store
+from .pcomfortcloud.apiclient import ApiClient
+from .pcomfortcloud.panasonicdevice import PanasonicDevice
+from .pcomfortcloud import constants
 
-from .const import PRESET_LIST, OPERATION_LIST
+from .const import PRESET_LIST, OPERATION_LIST, PRESET_8_15, PRESET_NONE, PRESET_ECO, PRESET_BOOST
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -19,11 +24,12 @@ MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=60)
 
 class PanasonicApiDevice:
 
-    def __init__(self, hass: HomeAssistant, api, device, force_outside_sensor, enable_energy_sensor): # noqa: E501
+    def __init__(self, hass: HomeAssistant, api: ApiClient, device, force_outside_sensor, enable_energy_sensor): # noqa: E501
         from .pcomfortcloud import constants
         self.hass = hass
         self._api = api
         self.device = device
+        self._details: PanasonicDevice = None
         self.force_outside_sensor = force_outside_sensor
         self.enable_energy_sensor = enable_energy_sensor
         self.id = device['id']
@@ -37,6 +43,8 @@ class PanasonicApiDevice:
         self.current_power_counter = 0
         self._available = True
         self.constants = constants
+        self._store = Store(hass, version=1, key=f"panasonic_cc_{self.id}")
+        
 
         self._is_on = False
         self._inside_temperature = None
@@ -52,8 +60,6 @@ class PanasonicApiDevice:
 
         self.features = None
 
-        
-
     @Throttle(MIN_TIME_BETWEEN_UPDATES)
     async def update(self, **kwargs):
         await self.do_update()
@@ -62,6 +68,9 @@ class PanasonicApiDevice:
     async def update_energy(self, **kwargs):
         await self.do_update_energy()
 
+    async def update_app_version(self):
+        await self._api.update_app_version()
+
     async def do_update(self):
         #_LOGGER.debug("Requesting data for device {id}".format(**self.device))
         try:
@@ -69,38 +78,33 @@ class PanasonicApiDevice:
         except:
             _LOGGER.debug("Error trying to get device {id} state, probably expired token, trying to update it...".format(**self.device)) # noqa: E501
             try:
-                await self.hass.async_add_executor_job(self._api.login)
+                await self._api.refresh_token()
                 data = await self._api.get_device(self.id)
             except:
-                _LOGGER.debug("Failed to renew token for device {id}, giving up for now".format(**self.device))  # noqa: E501
+                _LOGGER.warning("Failed to renew token for device {id}, giving up for now".format(**self.device))  # noqa: E501
                 return
 
         if data is None:
             self._available = False
             _LOGGER.debug("Received no data for device {id}".format(**self.device))
             return
+        self._details = data
         try:
             _LOGGER.debug("Data: {}".format(data))
 
-            if self.features is None:
-                self.features = data.get('features', None)
-
-            plst = data.get('parameters')
-            self._is_on = bool(plst.get('power').value)
-            if plst.get('temperatureInside') != 126:
-                self._inside_temperature = plst.get('temperatureInside')
-            if plst.get('temperatureOutside') != 126:
-                self._outside_temperature = plst.get('temperatureOutside')
-                if self._inside_temperature is None and self._outside_temperature is not None:
-                    self._inside_temperature = self._outside_temperature
-            if plst.get('temperature') != 126:
-                self._target_temperature = plst.get('temperature')
-            self._fan_mode = plst.get('fanSpeed').name
-            self._swing_mode = plst.get('airSwingVertical').name
-            self._swing_lr_mode = plst.get('airSwingHorizontal').name
-            self._hvac_mode = plst.get('mode').name
-            self._eco_mode = plst.get('eco').name
-            self._nanoe_mode = plst.get('nanoe', None)
+            self._is_on = bool(data.parameters.power.value)
+            if data.parameters.inside_temperature is not None:
+                self._inside_temperature = data.parameters.inside_temperature
+            if data.parameters.outside_temperature is not None:
+                self._outside_temperature = data.parameters.outside_temperature
+            if data.parameters.target_temperature is not None:
+                self._target_temperature = data.parameters.target_temperature
+            self._fan_mode = data.parameters.fan_speed.name
+            self._swing_mode = data.parameters.vertical_swing_mode.name
+            self._swing_lr_mode = data.parameters.horizontal_swing_mode.name
+            self._hvac_mode = data.parameters.mode.name
+            self._eco_mode = data.parameters.eco_mode.name
+            self._nanoe_mode = data.parameters.nanoe_mode
 
         except Exception as e:
             _LOGGER.debug("Failed to set data for device {id}".format(**self.device))
@@ -110,14 +114,15 @@ class PanasonicApiDevice:
 
     async def do_update_energy(self):
         #_LOGGER.debug("Requesting energy for device {id}".format(**self.device))
+        today = datetime.now().strftime("%Y%m%d")
         try:
-            data= await self._api.history(self.id,"Day",datetime.now().strftime("%Y%m%d")) # noqa: E501
+            data= await self._api.history(self.id,"Month",today) # noqa: E501
             
         except:
             _LOGGER.debug("Error trying to get device {id} state, probably expired token, trying to update it...".format(**self.device)) # noqa: E501
             try:
-                await self.hass.async_add_executor_job(self._api.login)
-                data= await self._api.get_device(self.id) # noqa: E501
+                await self._api.refresh_token()
+                data= await self._api.history(self.id,"Month",today) # noqa: E501
             except:
                 _LOGGER.debug("Failed to renew token for device {id}, giving up for now".format(**self.device)) # noqa: E501
                 return
@@ -125,27 +130,42 @@ class PanasonicApiDevice:
         if data is None:
             _LOGGER.debug("Received no energy data for device {id}".format(**self.device)) # noqa: E501
             return
+        
+        if 'historyDataList' not in data['parameters']:
+            return
         t1 = datetime.now()
-        if 'energyConsumption' in data['parameters']:
-            c_energy = data['parameters']['energyConsumption']
-            if c_energy:
-                if self.last_energy_reading_time is not None:
-                    if c_energy != self.last_energy_reading:                
-                        d = (t1 - self.last_energy_reading_time).total_seconds() / 60 / 60  # noqa: E501
-                        p = round((c_energy - self.last_energy_reading)*1000 / d)
-                        self.last_energy_reading = c_energy
-                        self.last_energy_reading_time = t1
-                        if p >= 0:
-                            self.current_power_value = p
-                        self.current_power_counter = 0
-                    else:
-                        self.current_power_counter += 1
-                        if self.current_power_counter > 30:
-                            self.current_power_value = 0
-                else:
-                    self.last_energy_reading = c_energy
-                    self.last_energy_reading_time = t1
-                self._daily_energy = data['parameters']['energyConsumption']
+        history = data['parameters']['historyDataList']
+        c_energy = None
+        for item in history:
+            if 'dataTime' not in item:
+                continue
+            if item['dataTime'] != today:
+                continue
+            if 'consumption' not in item:
+                break
+            c_energy = item['consumption']
+            break
+
+        if (c_energy is None) or (c_energy < 0):
+            return
+        t1 = datetime.now()
+        if self.last_energy_reading_time is not None:
+            if c_energy != self.last_energy_reading:                
+                d = (t1 - self.last_energy_reading_time).total_seconds() / 60 / 60  # noqa: E501
+                p = round((c_energy - self.last_energy_reading)*1000 / d)
+                self.last_energy_reading = c_energy
+                self.last_energy_reading_time = t1
+                if p >= 0:
+                    self.current_power_value = p
+                self.current_power_counter = 0
+            else:
+                self.current_power_counter += 1
+                if self.current_power_counter > 30:
+                    self.current_power_value = 0
+        else:
+            self.last_energy_reading = c_energy
+            self.last_energy_reading_time = t1
+        self._daily_energy = c_energy
 
     @property
     def available(self) -> bool:
@@ -160,6 +180,7 @@ class PanasonicApiDevice:
             "manufacturer": "Panasonic",
             "model": self.device['model'],
             "name": self.name,
+            "sw_version": self._api.app_version
         }
 
     @property
@@ -225,6 +246,28 @@ class PanasonicApiDevice:
         if not self.enable_energy_sensor:
             return None
         return self.current_power_value
+    
+    @property
+    def min_temp(self):
+        """Return the minimum temperature."""
+        if self.in_summer_house_mode:
+            return 8
+        return 16
+
+    @property
+    def max_temp(self):
+        """Return the maximum temperature."""
+        if self.in_summer_house_mode:
+            return 15 if self._details.features.summer_house == 2 else 10
+        return 30
+
+    @cached_property
+    def support_eco_navi(self) -> bool:
+        return self._details.features.eco_navi
+    
+    @property
+    def eco_navi(self):
+        return self._details.parameters.eco_navi_mode
 
     async def turn_off(self):
         await self.set_device(
@@ -237,16 +280,94 @@ class PanasonicApiDevice:
             { "power": self.constants.Power.On }
         )
         await self.do_update()
-        
+
+    @cached_property
+    def available_presets(self):
+        presets = [PRESET_NONE]
+        if self._details.features.quiet_mode:
+            presets.append(PRESET_ECO)
+        if self._details.features.powerful_mode:
+            presets.append(PRESET_BOOST)
+        if self._details.features.summer_house > 0:
+            presets.append(PRESET_8_15)
+        return presets
+
+    @property  
+    def preset_mode(self):
+        if not self._details:
+            return PRESET_NONE
+        match self._details.parameters.eco_mode:
+            case constants.EcoMode.Quiet:
+                return PRESET_ECO
+            case constants.EcoMode.Powerful:
+                return PRESET_BOOST
+        if self.in_summer_house_mode:
+            return PRESET_8_15        
+
+        return PRESET_NONE
+
+    @property
+    def in_summer_house_mode(self):
+        if not self._details:
+            return False
+        temp = self._details.parameters.target_temperature
+        i = 1 if temp - 8 > 0 else (0 if temp -8 else -1)
+        match self._details.features.summer_house:
+            case 1:
+                return i == 0 or temp == 10
+            case 2:
+                return i >= 0 and temp <= 15
+            case 3:
+                return i == 0 or temp == 10
+        return False
+
     async def set_preset_mode(self, preset_mode: str) -> None:
         """Set new preset mode."""
         _LOGGER.debug("Set %s ecomode %s", self.name, preset_mode)
-        await self.set_device(
-            { 
-                "power": self.constants.Power.On,
-                "eco": self.constants.EcoMode[ PRESET_LIST[preset_mode] ]
-            })
+        data = {
+            "power": constants.Power.On,
+            "eco": constants.EcoMode.Auto
+        }
+        if self.in_summer_house_mode and preset_mode != PRESET_8_15:
+            await self._exit_summer_house_mode(data)
+
+        if preset_mode == PRESET_ECO:
+            data["eco"] = constants.EcoMode.Quiet
+        elif preset_mode == PRESET_BOOST:
+            data["eco"] = constants.EcoMode.Powerful
+        elif preset_mode == PRESET_8_15:
+            await self._enter_summer_house_mode()
+            data["mode"] = constants.OperationMode.Heat
+            data["eco"] = constants.EcoMode.Auto
+            data["temperature"] = 8
+            data["fanSpeed"] = constants.FanSpeed.High
+        
+        await self.set_device(data)
         await self.do_update()
+
+    async def _enter_summer_house_mode(self):
+        data = await self._store.async_load()
+        if data is None:
+            data = {}
+        data['mode'] = self._details.parameters.mode
+        data['ecoMode'] = self._details.parameters.eco_mode
+        data['targetTemperature'] = self._details.parameters.target_temperature
+        data['fanSpeed'] = self._details.parameters.fan_speed
+        await self._store.async_save(data)
+
+    async def _exit_summer_house_mode(self, device_data):
+        stored_data = await self._store.async_load()
+        if stored_data is None:
+            return
+        if 'mode' in stored_data:
+            device_data['mode'] = stored_data['mode']
+        if 'ecoMode' in stored_data:
+            device_data["eco"] = stored_data['ecoMode']
+        if 'targetTemperature' in stored_data:
+            device_data['temperature'] = stored_data['targetTemperature']
+        if 'fanSpeed' in stored_data:
+            device_data['fanSpeed'] = stored_data['fanSpeed']
+
 
     async def set_temperature(self, **kwargs):
         """Set new target temperature."""
@@ -281,12 +402,14 @@ class PanasonicApiDevice:
     async def set_hvac_mode(self, hvac_mode):
         """Set operation mode."""
         _LOGGER.debug("Set %s mode %s", self.name, hvac_mode)
+        data = {
+            'power': self.constants.Power.On
+        }
+        if self.in_summer_house_mode:
+            await self._exit_summer_house_mode(data)
+        data['mode'] = self.constants.OperationMode[OPERATION_LIST[hvac_mode]] 
 
-        await self.set_device(
-            { 
-                "power": self.constants.Power.On,
-                "mode": self.constants.OperationMode[OPERATION_LIST[hvac_mode]] 
-            })
+        await self.set_device(data)
 
         await self.do_update()
 
@@ -332,6 +455,15 @@ class PanasonicApiDevice:
 
         await self.set_device(
             { "nanoe": self.constants.NanoeMode[nanoe_mode] }
+        )
+        await self.do_update()
+
+    async def set_eco_navi_mode(self, eco_navi: constants.EcoNaviMode):
+        """Set new nanoe mode."""
+        _LOGGER.debug("Set %s eco navi mode %s", self.name, eco_navi.name)
+
+        await self.set_device(
+            { "nanoe": eco_navi }
         )
         await self.do_update()
 

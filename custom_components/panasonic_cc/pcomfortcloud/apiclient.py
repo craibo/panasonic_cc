@@ -5,10 +5,26 @@ Panasonic session, using Panasonic Comfort Cloud app api
 import hashlib
 import re
 import aiohttp
+import time
 from urllib.parse import quote_plus
 
 from . import constants
 from . import panasonicsession
+from .panasonicdevice import PanasonicDevice
+
+_current_time_zone = None
+def get_current_time_zone():
+    global _current_time_zone
+    if _current_time_zone is not None:
+        return _current_time_zone
+    local_offset_seconds = -time.timezone
+    if time.daylight:
+        local_offset_seconds += 3600
+    hours, remainder = divmod(abs(local_offset_seconds), 3600)
+    minutes = remainder // 60
+    _current_time_zone = f"{'+' if local_offset_seconds >= 0 else '-'}{int(hours):02}:{int(minutes):02}"
+    return _current_time_zone
+    
 
 
 class ApiClient(panasonicsession.PanasonicSession):
@@ -29,6 +45,9 @@ class ApiClient(panasonicsession.PanasonicSession):
     async def start_session(self):
         await super().start_session()
         await self._get_groups()
+
+    async def refresh_token(self):
+        await super().start_session()
 
     async def _get_groups(self):
         self._groups = await self.execute_get(
@@ -71,39 +90,39 @@ class ApiClient(panasonicsession.PanasonicSession):
             return self.execute_get(self._get_device_status_url(device_guid), "dump", 200)
         return None
 
-    async def history(self, device_id, mode, date, time_zone="+01:00"):
+    async def history(self, device_id, mode, date, time_zone=""):
         device_guid = self._device_indexer.get(device_id)
+        if not device_guid:
+            return None
+        if not time_zone:
+            time_zone = get_current_time_zone()
+        try:
+            data_mode = constants.DataMode[mode].value
+        except KeyError:
+            raise Exception("Wrong mode parameter")
 
-        if device_guid:
-            try:
-                data_mode = constants.DataMode[mode].value
-            except KeyError:
-                raise Exception("Wrong mode parameter")
+        payload = {
+            "deviceGuid": device_guid,
+            "dataMode": data_mode,
+            "date": date,
+            "osTimezone": time_zone
+        }
 
-            payload = {
-                "deviceGuid": device_guid,
-                "dataMode": data_mode,
-                "date": date,
-                "osTimezone": time_zone
-            }
+        json_response = await self.execute_post(self._get_device_history_url(), payload, "history", 200)
 
-            json_response = await self.execute_post(self._get_device_history_url(), payload, "history", 200)
+        return {
+            'id': device_id,
+            'parameters': self._read_parameters(json_response)
+        }
+    
+    
 
-            return {
-                'id': device_id,
-                'parameters': self._read_parameters(json_response)
-            }
-        return None
-
-    async def get_device(self, device_id):
+    async def get_device(self, device_id) -> PanasonicDevice:
         device_guid = self._device_indexer.get(device_id)
 
         if device_guid:
             json_response = await self.execute_get(self._get_device_status_url(device_guid), "get_device", 200)
-            return {
-                'id': device_id,
-                'parameters': self._read_parameters(json_response['parameters'])
-            }
+            return PanasonicDevice(device_id, json_response)
         return None
 
     async def set_device(self, device_id, **kwargs):
@@ -152,10 +171,10 @@ class ApiClient(panasonicsession.PanasonicSession):
             fan_auto = 0
             device = await self.get_device(device_id)
 
-            if device and device['parameters']['airSwingHorizontal'].value == -1:
+            if device and device.parameters.horizontal_swing_mode == constants.AirSwingLR.Auto:
                 fan_auto = fan_auto | 1
 
-            if device and device['parameters']['airSwingVertical'].value == -1:
+            if device and device.parameters.vertical_swing_mode == constants.AirSwingUD.Auto:
                 fan_auto = fan_auto | 2
 
             if air_x is not None:
@@ -245,27 +264,27 @@ class ApiClient(panasonicsession.PanasonicSession):
 
     def _get_group_url(self):
         return '{base_url}/device/group'.format(
-            base_url=panasonicsession.PanasonicSession.BASE_PATH_ACC
+            base_url=constants.BASE_PATH_ACC
         )
 
     def _get_device_status_url(self, guid):
         return '{base_url}/deviceStatus/{guid}'.format(
-            base_url=panasonicsession.PanasonicSession.BASE_PATH_ACC,
-            guid=re.sub('(?i)2f', 'f', quote_plus(guid))
+            base_url=constants.BASE_PATH_ACC,
+            guid=re.sub(r'(?i)\%2f', 'f', quote_plus(guid))
         )
 
     def _get_device_status_now_url(self, guid):
         return '{base_url}/deviceStatus/now/{guid}'.format(
-            base_url=panasonicsession.PanasonicSession.BASE_PATH_ACC,
-            guid=re.sub('(?i)2f', 'f', quote_plus(guid))
+            base_url=constants.BASE_PATH_ACC,
+            guid=re.sub(r'(?i)\%2f', 'f', quote_plus(guid))
         )
 
     def _get_device_status_control_url(self):
         return '{base_url}/deviceStatus/control'.format(
-            base_url=panasonicsession.PanasonicSession.BASE_PATH_ACC
+            base_url=constants.BASE_PATH_ACC
         )
 
     def _get_device_history_url(self):
         return '{base_url}/deviceHistoryData'.format(
-            base_url=panasonicsession.PanasonicSession.BASE_PATH_ACC,
+            base_url=constants.BASE_PATH_ACC,
         )

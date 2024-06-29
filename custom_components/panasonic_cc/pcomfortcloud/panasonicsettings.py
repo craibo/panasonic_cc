@@ -5,6 +5,7 @@ import time
 import base64
 import aiofiles
 import asyncio
+import logging
 from datetime import date
 from packaging import version
 
@@ -21,6 +22,8 @@ from .constants import (
     MAX_VERSION_AGE
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 class PanasonicSettings:
 
     def __init__(self, fileName):
@@ -32,23 +35,36 @@ class PanasonicSettings:
         self._refresh_token = None
         self._scope = None
         self._clientId = ""
-        asyncio.ensure_future(self._load())
+        self._loading_task =asyncio.ensure_future(self._load())
         
+    async def is_ready(self):
+        await self._loading_task
+        return True
 
     async def _load(self):
         if not os.path.exists(self._fileName):
+            _LOGGER.info("Settings file '%s' was not found", self._fileName)
             return
         try:
             async with aiofiles.open(self._fileName) as json_file:
-                data = json.load(await json_file.read())
-                self._version = data[SETTING_VERSION]
-                self._versionDate = date.fromisoformat(data[SETTING_VERSION_DATE])
-                self._access_token = data[SETTING_ACCESS_TOKEN]
-                self._access_token_expires = data[SETTING_ACCESS_TOKEN_EXPIRES]
-                self._refresh_token = data[SETTING_REFRESH_TOKEN]
-                self._clientId = data[SETTING_CLIENT_ID]
-                self._scope = data[SETTING_SCOPE]
-        except:
+                data = json.loads(await json_file.read())
+                if SETTING_VERSION in data:
+                    self._version = data[SETTING_VERSION]
+                if SETTING_VERSION_DATE in data:
+                    self._versionDate = date.fromisoformat(data[SETTING_VERSION_DATE])
+                if SETTING_ACCESS_TOKEN in data:
+                    self._access_token = data[SETTING_ACCESS_TOKEN]
+                if SETTING_ACCESS_TOKEN_EXPIRES in data:
+                    self._access_token_expires = data[SETTING_ACCESS_TOKEN_EXPIRES]
+                if SETTING_REFRESH_TOKEN in data:
+                    self._refresh_token = data[SETTING_REFRESH_TOKEN]
+                if SETTING_CLIENT_ID in data:
+                    self._clientId = data[SETTING_CLIENT_ID]
+                if SETTING_SCOPE in data:
+                    self._scope = data[SETTING_SCOPE]
+                _LOGGER.debug("Loaded settings from '%s'", self._fileName)
+        except Exception as ex:
+            _LOGGER.warning("Failed to loaded settings from '%s'", self._fileName, exc_info = ex)
             pass
     
     def _save(self):
@@ -67,6 +83,7 @@ class PanasonicSettings:
     async def _do_save(self, data):
         async with aiofiles.open(self._fileName, 'w') as outfile:
             await outfile.write(json.dumps(data))
+            _LOGGER.debug("Saved settings to '%s'", self._fileName)
 
     @property
     def version(self):
@@ -75,11 +92,11 @@ class PanasonicSettings:
         return self._version
 
     @version.setter
-    def version(self,value):
+    def version(self,value:str):
         if value is None:
             return
         if (self._version is None
-            or version.parse(self._version) < version.parse(value)):
+            or version.parse(self._version.strip('"')) < version.parse(value.strip('"'))):
             self._version = value
         self._versionDate = date.today()
         self._save()
@@ -87,6 +104,8 @@ class PanasonicSettings:
     @property
     def is_version_expired(self):
         if self._version is None:
+            return True
+        if not self._version:
             return True
         if self._versionDate is None:
             return True
