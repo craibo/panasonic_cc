@@ -26,10 +26,14 @@ CONF_FORCE_OUTSIDE_SENSOR = "force_outside_sensor"
 DEFAULT_FORCE_OUTSIDE_SENSOR = False
 CONF_ENABLE_DAILY_ENERGY_SENSOR = "enable_daily_energy_sensor"
 DEFAULT_ENABLE_DAILY_ENERGY_SENSOR = False
+CONF_USE_PANASONIC_PRESET_NAMES = "use_panasonic_preset_names"
+DEFAULT_USE_PANASONIC_PRESET_NAMES = True
 
 SENSOR_TYPE_TEMPERATURE = "temperature"
 
 PRESET_8_15 = "+8/15"
+PRESET_QUIET = "quiet"
+PRESET_POWERFUL = "powerful"
 
 SENSOR_TYPES = {
     ATTR_INSIDE_TEMPERATURE: {
@@ -82,11 +86,38 @@ OPERATION_LIST = {
     HVACMode.FAN_ONLY: 'Fan'
 }
 
+DOMAIN = "panasonic_cc"
+MANUFACTURER = "Panasonic"
 PANASONIC_DEVICES = "panasonic_devices"
+DATA_COORDINATORS = "data_coordinators"
+ENERGY_COORDINATORS = "energy_coordinators"
 
 COMPONENT_TYPES = [
     "climate", 
     "sensor", 
     "switch",
-    "button"
+    "button",
+    "select",
+    "number"
     ]
+
+STARTUP = """
+-------------------------------------------------------------------
+Panasonic Comfort Cloud
+
+Version: %s
+This is a custom integration
+If you have any issues with this you need to open an issue here:
+https://github.com/sockless-coding/panasonic_cc/issues
+-------------------------------------------------------------------
+"""
+
+SELECT_HORIZONTAL_SWING = "horizontal_swing"
+SELECT_VERTICAL_SWING = "vertical_swing"
+
+CONF_DEVICE_FETCH_INTERVAL = "device_fetch_interval"
+CONF_ENERGY_FETCH_INTERVAL = "energy_fetch_interval"
+DEFAULT_DEVICE_FETCH_INTERVAL = 30
+DEFAULT_ENERGY_FETCH_INTERVAL = 60
+CONF_FORCE_ENABLE_NANOE = "force_enable_nanoe"
+DEFAULT_FORCE_ENABLE_NANOE = False

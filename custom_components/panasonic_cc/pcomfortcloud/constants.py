@@ -1,3 +1,4 @@
+
 from enum import Enum
 
 
@@ -31,6 +32,7 @@ class AirSwingLR(Enum):
     Mid = 2
     RightMid = 4
     Right = 0
+    Unavailable = 6
 
 
 class EcoMode(Enum):
@@ -70,14 +72,29 @@ class NanoeMode(Enum):
     All = 4
 
 class EcoNaviMode(Enum):
+    Unavailable = 0
+    Off = 1
+    On = 2
+
+class EcoFunctionMode(Enum):
+    Unavailable = 0
+    Off = 1
+    On = 2
+
+class ZoneMode(Enum):
     Off = 0
     On = 1
+
+class IAutoXMode(Enum):
+    Unavailable = 0
+    Off = 1
+    On = 2
 
 INVALID_TEMPERATURE = 126
 
 DEFAULT_X_APP_VERSION = "1.21.0"
 
-MAX_VERSION_AGE = 5
+MAX_VERSION_AGE = 2
 
 SETTING_ACCESS_TOKEN = "access_token"
 SETTING_ACCESS_TOKEN_EXPIRES = "access_token_expires"
@@ -94,3 +111,11 @@ BASE_PATH_AUTH = "https://authglb.digital.panasonic.com"
 BASE_PATH_ACC = "https://accsmart.panasonic.com"
 AUTH_API_USER_AGENT = "okhttp/4.10.0"
 AUTH_BROWSER_USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Mobile Safari/537.36"
+
+CHECK_RESPONSE_ERROR_MESSAGE = """Error in %s
+Expected status code '%s' but received '%s'
+Response body: %s"""
+CHECK_RESPONSE_ERROR_MESSAGE_WITH_PAYLOAD = """Error in %s
+Expected status code '%s' but received '%s'
+Payload: %s
+Response body: %s"""

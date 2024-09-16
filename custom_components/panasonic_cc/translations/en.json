@@ -4,24 +4,109 @@
       "user": {
         "title": "Panasonic Comfort Cloud",
         "description": "Enter your Panasonic ID and password",
-        "data": { "username": "Panasonic ID", "password": "Password" }
+        "data": {
+          "username": "Panasonic ID",
+          "password": "Password",
+          "enable_daily_energy_sensor": "Enable daily energy sensors",
+          "force_enable_nanoe": "Enable Nanoe switch for all devices",
+          "use_panasonic_preset_names": "Use 'Quiet' and 'Powerful' instead of 'Eco' and 'Boost' Presets",
+          "device_fetch_interval": "Device fetch interval (seconds)",
+          "energy_fetch_interval": "Energy fetch interval (seconds)"
+        }
+      },
+      "reconfigure_confirm": {
+        "title": "Reconfigure Panasonic Comfort Cloud",
+        "description": "Enter your Panasonic ID and password to re-authenticate",
+        "data": {
+          "username": "Panasonic ID",
+          "password": "Password"
+        }
       }
+    },
+    "error":{
+      "no_devices": "No devices found. Please check your the account and CFC app and try again.",
+      "device_timeout": "Timeout connecting to the API.",
+      "device_fail": "Unexpected error connecting to the API.",
+      "invalid_user_password": "Invalid Panasonic ID or password."
     },
     "abort": {
       "device_timeout": "Timeout connecting to the device.",
       "device_fail": "Unexpected error creating device.",
-      "already_configured": "Device is already configured"
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Re-authentication successful."
     }
   },
   "options": {
     "step": {
-        "init": {
-            "data": {
-              "force_outside_sensor": "Force outside sensor",
-              "enable_daily_energy_sensor": "Enable daily energy sensor (requires restart)"
-            }
+      "init": {
+        "data": {
+          "force_outside_sensor": "Force outside sensor",
+          "enable_daily_energy_sensor": "Enable daily energy sensors (requires restart)",
+          "force_enable_nanoe": "Enable Nanoe switch for all devices (requires restart)",
+          "use_panasonic_preset_names": "Use 'Quiet' and 'Powerful' instead of 'Eco' and 'Boost' Presets (requires restart)",
+          "device_fetch_interval": "Device fetch interval (seconds)",
+          "energy_fetch_interval": "Energy fetch interval (seconds)"
         }
+      }
+    }
+  },
+  "entity": {
+    "climate": {
+      "climate": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "+8/15": "+8/15°C",
+              "none": "None",
+              "quiet": "Quiet",
+              "powerful": "Powerful"
+            }
+          },
+          "swing_mode":{
+            "state": {
+              "Auto": "Auto",
+              "Up": "Top",
+              "UpMid": "Mid-top",
+              "Mid": "Middle",
+              "DownMid": "Mid-bottom",
+              "Down": "Bottom",
+              "Swing": "Swing"
+            }
+          },
+          "fan_mode":{
+            "state": {
+              "Auto": "Auto",
+              "Low": "Low",
+              "LowMid": "Medium-Low",
+              "Mid": "Medium",
+              "HighMid": "Medium-High",
+              "High": "High"
+            }
+          }
+        }
+      }
+    },
+    "select": {
+      "horizontal_swing":{
+        "state": {
+          "Auto": "Auto",
+          "Left": "Left",
+          "LeftMid": "Center left",
+          "Mid": "Center",
+          "RightMid": "Center right",
+          "Right": "Right"
+        }
+      },
+      "vertical_swing":{
+        "state": {
+          "Auto": "Auto",
+          "Up": "Top",
+          "UpMid": "Mid-top",
+          "Mid": "Middle",
+          "DownMid": "Mid-bottom",
+          "Down": "Bottom"
+        }
+      }
     }
   }
 }
-  
