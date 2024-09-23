@@ -7,7 +7,8 @@ import re
 import aiohttp
 import time
 from datetime import datetime
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
+
 
 from . import constants
 from . import panasonicsession
@@ -41,9 +42,19 @@ class ApiClient(panasonicsession.PanasonicSession):
 
         self._groups = None
         self._devices: list[PanasonicDeviceInfo] = None
+        self._unknown_devices: list[PanasonicDeviceInfo] = []
+
         self._device_indexer = {}
         self._raw = raw
         self._acc_client_id = None
+
+    @property
+    def unknown_devices(self):
+        return self._unknown_devices
+    
+    @property
+    def has_unknown_devices(self):
+        return len(self._unknown_devices) > 0
 
     async def start_session(self):
         await super().start_session()
@@ -73,6 +84,7 @@ class ApiClient(panasonicsession.PanasonicSession):
     def get_devices(self):
         if self._devices is None:
             self._devices = []
+            self._unknown_devices = []
 
             for group in self._groups['groupList']:
                 if 'deviceList' in group:
@@ -86,6 +98,8 @@ class ApiClient(panasonicsession.PanasonicSession):
                         if device_info.is_valid:
                             self._device_indexer[device_info.id] = device_info.guid
                             self._devices.append(device_info)
+                        else:
+                            self._unknown_devices.append(device_info)
         return self._devices
 
     def dump(self, device_id):
@@ -122,13 +136,17 @@ class ApiClient(panasonicsession.PanasonicSession):
     
 
     async def get_device(self, device_info: PanasonicDeviceInfo) -> PanasonicDevice:
-        json_response = await self.execute_get(self._get_device_status_url(device_info.guid), "get_device", 200)
+        json_response = await self.execute_get(self._get_device_status_now_url(device_info.guid), "get_device", 200)
         return PanasonicDevice(device_info, json_response)
     
     async def try_update_device(self, device: PanasonicDevice) -> bool:
         device_guid = device.info.guid
-        json_response = await self.execute_get(self._get_device_status_url(device_guid), "try_update", 200)
+        json_response = await self.execute_get(self._get_device_status_now_url(device_guid), "try_update", 200)
         return device.load(json_response)
+    
+    async def get_aquarea_device(self, device_info: PanasonicDeviceInfo):
+        json_response = await self.execute_get(self._get_aquarea_device_info_url(device_info.guid), "get_aquarea_device", 200)
+        return json_response
     
     async def async_get_energy(self, device_info: PanasonicDeviceInfo) -> PanasonicDeviceEnergy | None:
         todays_item = await self._async_get_todays_energy(device_info)
@@ -405,13 +423,19 @@ class ApiClient(panasonicsession.PanasonicSession):
     def _get_device_status_url(self, guid):
         return '{base_url}/deviceStatus/{guid}'.format(
             base_url=constants.BASE_PATH_ACC,
-            guid=re.sub(r'(?i)\%2f', 'f', quote_plus(guid))
+            guid=self._prepare_device_guid(guid)
         )
 
     def _get_device_status_now_url(self, guid):
         return '{base_url}/deviceStatus/now/{guid}'.format(
             base_url=constants.BASE_PATH_ACC,
-            guid=re.sub(r'(?i)\%2f', 'f', quote_plus(guid))
+            guid=self._prepare_device_guid(guid)
+        )
+    
+    def _get_aquarea_device_info_url(self, guid):
+        return '{base_url}/device/a2wInfo/{guid}'.format(
+            base_url=constants.BASE_PATH_ACC,
+            guid=self._prepare_device_guid(guid)
         )
 
     def _get_device_status_control_url(self):
@@ -423,3 +447,7 @@ class ApiClient(panasonicsession.PanasonicSession):
         return '{base_url}/deviceHistoryData'.format(
             base_url=constants.BASE_PATH_ACC,
         )
+    
+    def _prepare_device_guid(self, device_guid: str):
+        device_guid = device_guid.replace("/", "f")
+        return quote_plus(device_guid, encoding='utf-8')
